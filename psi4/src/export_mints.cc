@@ -147,12 +147,30 @@ std::shared_ptr<BasisSet> construct_basisset_from_pydict(const std::shared_ptr<M
         throw PSIEXCEPTION("BasisSet contains ECP shells but libecpint addon not enabled. Re-compile with `-D ENABLE_ecpint=ON`.");
 #endif
         py::list ecpbasisinfo = pybs["ecp_shell_map"].cast<py::list>();
+        outfile->Printf("\nEntering the atom loop\n\n");
+        outfile->Printf("Number of atoms in 'mol': %d\n", mol->natom());
+        mol->print();
         for (int atom = 0; atom < py::len(ecpbasisinfo); ++atom) {
             std::vector<ShellInfo> vec_shellinfo;
             py::list atominfo = ecpbasisinfo[atom].cast<py::list>();
             std::string atomlabel = atominfo[0].cast<std::string>();
             std::string hash = atominfo[1].cast<std::string>();
             int ncore = atominfo[2].cast<int>();
+            outfile->Printf("%d  ncore: %d\n", atom, ncore);
+            // We do NOT want do it if:
+            //     - it is not SAD
+            //     and
+            //     - it is not GHOST
+            bool robto = true;
+            if (atom < mol->natom()) {
+                outfile->Printf("atom mnieszy niz natom\n");
+                outfile->Printf("mol->Z: %f\n", mol->Z(atom));
+                if (mol->Z(atom) == 0.0) {
+                    // We should be here only whent it is not SAD and it is GHOST
+                    outfile->Printf("NIE ROBIE\n");
+                    robto = false;
+                }
+            }
             for (int atomshells = 3; atomshells < py::len(atominfo); ++atomshells) {
                 // Each shell entry has p primitives that look like
                 // [ angmom, [ [ e1, c1, r1 ], [ e2, c2, r2 ], ...., [ ep, cp, rp ] ] ]
@@ -168,12 +186,17 @@ std::shared_ptr<BasisSet> construct_basisset_from_pydict(const std::shared_ptr<M
                     coefficients.push_back(primitiveinfo[1].cast<double>());
                     ns.push_back(primitiveinfo[2].cast<int>());
                 }
+                if (robto) {
                 vec_shellinfo.push_back(ShellInfo(am, coefficients, exponents, ns));
+                }
             }
             basis_atom_ncore[name][atomlabel] = ncore;
+            if (robto) {
             basis_atom_ecpshell[name][atomlabel] = vec_shellinfo;
+            }
             totalncore += ncore;
         }
+        outfile->Printf("\nWe are out of atom loop\n");
     }
 
     mol->update_geometry();  // update symmetry with basisset info
