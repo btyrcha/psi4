@@ -144,31 +144,27 @@ std::shared_ptr<BasisSet> construct_basisset_from_pydict(const std::shared_ptr<M
     int totalncore = 0;
     if (pybs.contains("ecp_shell_map")) {
 #ifndef USING_ecpint
-        throw PSIEXCEPTION("BasisSet contains ECP shells but libecpint addon not enabled. Re-compile with `-D ENABLE_ecpint=ON`.");
+        throw PSIEXCEPTION(
+            "BasisSet contains ECP shells but libecpint addon not enabled. Re-compile with `-D ENABLE_ecpint=ON`.");
 #endif
         py::list ecpbasisinfo = pybs["ecp_shell_map"].cast<py::list>();
-        outfile->Printf("\nEntering the atom loop\n\n");
-        outfile->Printf("Number of atoms in 'mol': %d\n", mol->natom());
-        mol->print();
         for (int atom = 0; atom < py::len(ecpbasisinfo); ++atom) {
             std::vector<ShellInfo> vec_shellinfo;
             py::list atominfo = ecpbasisinfo[atom].cast<py::list>();
             std::string atomlabel = atominfo[0].cast<std::string>();
             std::string hash = atominfo[1].cast<std::string>();
             int ncore = atominfo[2].cast<int>();
-            outfile->Printf("%d  ncore: %d\n", atom, ncore);
-            // We do NOT want do it if:
-            //     - it is not SAD
-            //     and
-            //     - it is not GHOST
-            bool robto = true;
+            bool addecpforatom = true;
+            // We do NOT want to load ECPs when atom is GHOST!
+            //
+            // Tha atom loop always goes over all atoms in a geometry,
+            // also for SAD guess, when the 'mol' object contains only one atom.
+            // In such case loop index 'atom' goes beyond the scope of atoms list in the 'mol' object.
+            // Therefore, calling 'mol->Z(atom)' in such case raises an error and the program crashes.
             if (atom < mol->natom()) {
-                outfile->Printf("atom mnieszy niz natom\n");
-                outfile->Printf("mol->Z: %f\n", mol->Z(atom));
                 if (mol->Z(atom) == 0.0) {
                     // We should be here only whent it is not SAD and it is GHOST
-                    outfile->Printf("NIE ROBIE\n");
-                    robto = false;
+                    addecpforatom = false;
                 }
             }
             for (int atomshells = 3; atomshells < py::len(atominfo); ++atomshells) {
@@ -186,17 +182,16 @@ std::shared_ptr<BasisSet> construct_basisset_from_pydict(const std::shared_ptr<M
                     coefficients.push_back(primitiveinfo[1].cast<double>());
                     ns.push_back(primitiveinfo[2].cast<int>());
                 }
-                if (robto) {
-                vec_shellinfo.push_back(ShellInfo(am, coefficients, exponents, ns));
+                if (addecpforatom) {
+                    vec_shellinfo.push_back(ShellInfo(am, coefficients, exponents, ns));
                 }
             }
             basis_atom_ncore[name][atomlabel] = ncore;
-            if (robto) {
-            basis_atom_ecpshell[name][atomlabel] = vec_shellinfo;
+            if (addecpforatom) {
+                basis_atom_ecpshell[name][atomlabel] = vec_shellinfo;
             }
             totalncore += ncore;
         }
-        outfile->Printf("\nWe are out of atom loop\n");
     }
 
     mol->update_geometry();  // update symmetry with basisset info
@@ -341,7 +336,7 @@ void export_mints(py::module& m) {
     typedef double (Vector::*vector_getitem_2)(int, int) const;
     typedef double (Vector::*vector_one_double)(const Vector& other);
     typedef void (Vector::*vector_two)(double scale, const Vector& other);
-    typedef void (Vector::*vector_three)(double alpha, double beta, const Vector &other);
+    typedef void (Vector::*vector_three)(double alpha, double beta, const Vector& other);
 
     py::class_<Dimension>(m, "Dimension", "Initializes and defines Dimension Objects")
         .def(py::init<size_t>())
@@ -375,14 +370,13 @@ void export_mints(py::module& m) {
 
     py::class_<IrreppedVector<double>, std::shared_ptr<IrreppedVector<double>>>(m, "ProtoVector");
 
-    py::class_<Vector, std::shared_ptr<Vector>, IrreppedVector<double>>(m, "Vector", "Class for creating and manipulating vectors",
-                                                py::dynamic_attr())
+    py::class_<Vector, std::shared_ptr<Vector>, IrreppedVector<double>>(
+        m, "Vector", "Class for creating and manipulating vectors", py::dynamic_attr())
         .def(py::init<int>())
         .def(py::init<const Dimension&>())
         .def(py::init<const std::string&, int>())
         .def(py::init<const std::string&, const Dimension&>())
-        .def_property("name", &Vector::name, &Vector::set_name,
-                      "The name of the Vector. Used in printing.")
+        .def_property("name", &Vector::name, &Vector::set_name, "The name of the Vector. Used in printing.")
         .def("init", &Vector::init, "Reallocate the data of the Vector. Consider making a new object.")
         .def("get", vector_getitem_1(&Vector::get), "Returns a single element value located at m", "m"_a)
         .def("get", vector_getitem_2(&Vector::get), "Returns a single element value located at m in irrep h", "h"_a,
@@ -391,24 +385,24 @@ void export_mints(py::module& m) {
         .def("set", vector_setitem_2(&Vector::set), "Sets a single element value located at m in irrep h", "h"_a, "m"_a,
              "val"_a)
         .def("add", vector_setitem_1(&Vector::add), "Add to a single element value located at m", "m"_a, "val"_a)
-        .def("add", vector_setitem_2(&Vector::add), "Add to a single element value located at m in irrep h", "h"_a, "m"_a,
-             "val"_a)
+        .def("add", vector_setitem_2(&Vector::add), "Add to a single element value located at m in irrep h", "h"_a,
+             "m"_a, "val"_a)
         .def("copy", &Vector::copy, "Copy another vector into this.")
         .def(
-            "clone",
-            [](Vector& vec) {
-                return std::make_shared<Vector>(std::move(vec.clone()));
-            },
-            "Clone the vector")
+            "clone", [](Vector& vec) { return std::make_shared<Vector>(std::move(vec.clone())); }, "Clone the vector")
         .def("zero", &Vector::zero, "Zeros the vector")
-        .def("print_out", [](Vector& vec) {vec.print();}, "Prints the vector to the output file")
+        .def(
+            "print_out", [](Vector& vec) { vec.print(); }, "Prints the vector to the output file")
         .def("scale", &Vector::scale, "Scales the elements of a vector by sc", "sc"_a)
         .def("dim", &Vector::dim, "Returns the dimensions of the vector per irrep h", "h"_a = 0)
         .def("dimpi", &Vector::dimpi, "Returns the Dimension object")
         .def("nirrep", &Vector::nirrep, "Returns the number of irreps")
         .def("vector_dot", vector_one_double(&Vector::vector_dot), "Take the dot product of two vectors", "other"_a)
-        .def("axpy", vector_two(&Vector::axpy), "Adds to this vector (unscaled) another vector scaled by a; self <- a * other + self", "a"_a, "other"_a)
-        .def("axpby", vector_three(&Vector::axpby), "Adds to this vector scaled by b another vector scaled by a; self <- a * other + b * self", "a"_a, "b"_a, "other"_a)
+        .def("axpy", vector_two(&Vector::axpy),
+             "Adds to this vector (unscaled) another vector scaled by a; self <- a * other + self", "a"_a, "other"_a)
+        .def("axpby", vector_three(&Vector::axpby),
+             "Adds to this vector scaled by b another vector scaled by a; self <- a * other + b * self", "a"_a, "b"_a,
+             "other"_a)
         .def("save", &Vector::save, "Save the vector to disk", "psio"_a, "file"_a)
         .def("load", &Vector::load, "Load the vector from disk", "psio"_a, "file"_a)
         .def("get_block", &Vector::get_block, "Get a vector block", "slice"_a)
@@ -462,31 +456,30 @@ void export_mints(py::module& m) {
     typedef int (IntVector::*int_vector_get_2)(int, int) const;
     typedef void (IntVector::*int_vector_set_1)(int, int);
     typedef void (IntVector::*int_vector_set_2)(int, int, int);
-    py::class_<IntVector, std::shared_ptr<IntVector>, IrreppedVector<int>>(m, "IntVector", "Class handling vectors with integer values")
+    py::class_<IntVector, std::shared_ptr<IntVector>, IrreppedVector<int>>(m, "IntVector",
+                                                                           "Class handling vectors with integer values")
         .def(py::init<int>())
         .def(py::init<const Dimension&>())
         .def(py::init<const std::string&, int>())
         .def(py::init<const std::string&, const Dimension&>())
-        .def_property("name", &IntVector::name, &IntVector::set_name,
-                      "The name of the IntVector. Used in printing.")
+        .def_property("name", &IntVector::name, &IntVector::set_name, "The name of the IntVector. Used in printing.")
         .def("init", &IntVector::init, "Reallocate the data of the Vector. Consider making a new object.")
         .def("get", int_vector_get_1(&IntVector::get), "Returns a single element value located at m", "m"_a)
-        .def("get", int_vector_get_2(&IntVector::get), "Returns a single element value located at m in irrep h", "h"_a, "m"_a)
+        .def("get", int_vector_get_2(&IntVector::get), "Returns a single element value located at m in irrep h", "h"_a,
+             "m"_a)
         .def("set", int_vector_set_1(&IntVector::set), "Sets a single element value located at m", "m"_a, "val"_a)
         .def("set", int_vector_set_2(&IntVector::set), "Sets a single element value located at m in irrep h", "h"_a,
              "m"_a, "val"_a)
         .def("add", int_vector_set_1(&IntVector::add), "Add to a single element value located at m", "m"_a, "val"_a)
-        .def("add", int_vector_set_2(&IntVector::add), "Add to a single element value located at m in irrep h", "h"_a, "m"_a,
-             "val"_a)
+        .def("add", int_vector_set_2(&IntVector::add), "Add to a single element value located at m in irrep h", "h"_a,
+             "m"_a, "val"_a)
         .def("copy", &IntVector::copy, "Copy another vector into this.")
         .def(
-            "clone",
-            [](IntVector& vec) {
-                return std::make_shared<IntVector>(std::move(vec.clone()));
-            },
+            "clone", [](IntVector& vec) { return std::make_shared<IntVector>(std::move(vec.clone())); },
             "Clone the vector")
         .def("zero", &IntVector::zero, "Zeros the vector")
-        .def("print_out", [](IntVector& vec) {vec.print();}, "Prints the vector to the output file")
+        .def(
+            "print_out", [](IntVector& vec) { vec.print(); }, "Prints the vector to the output file")
         .def("dim", &IntVector::dim, "Returns the number of dimensions per irrep h", "h"_a = 0)
         .def("dimpi", &IntVector::dimpi, "Returns the Dimension object")
         .def("nirrep", &IntVector::nirrep, "Returns the number of irreps")
@@ -880,9 +873,12 @@ void export_mints(py::module& m) {
         .def("connectivity", &Molecule::connectivity, "Gets molecule connectivity")
         .def("reinterpret_coordentry", &Molecule::set_reinterpret_coordentry,
              "Do reinterpret coordinate entries during update_geometry().")
-        .def("fix_orientation", &Molecule::set_orientation_fixed, "Fix the orientation at its current frame. Expert use only; use before molecule finalized by update_geometry.")
+        .def("fix_orientation", &Molecule::set_orientation_fixed,
+             "Fix the orientation at its current frame. Expert use only; use before molecule finalized by "
+             "update_geometry.")
         .def("fix_com", &Molecule::set_com_fixed,
-             "Sets whether to fix the Cartesian position, or to translate to the C.O.M. Expert use only; use before molecule finalized by update_geometry.")
+             "Sets whether to fix the Cartesian position, or to translate to the C.O.M. Expert use only; use before "
+             "molecule finalized by update_geometry.")
         .def("orientation_fixed", &Molecule::orientation_fixed, "Get whether or not orientation is fixed")
         .def("com_fixed", &Molecule::com_fixed, "Gets whether or not center of mass is fixed")
         .def("symmetry_from_input", &Molecule::symmetry_from_input, "Returns the symmetry specified in the input")
@@ -900,8 +896,7 @@ void export_mints(py::module& m) {
              "Gets the label of the orbital basis set on a given atom arg0")
         .def("print_in_input_format", &Molecule::print_in_input_format,
              "Prints the molecule as Cartesian or ZMatrix entries, just as inputted.")
-        .def("has_zmatrix", &Molecule::has_zmatrix,
-            "Get whether or not this molecule has at least one zmatrix entry")
+        .def("has_zmatrix", &Molecule::has_zmatrix, "Get whether or not this molecule has at least one zmatrix entry")
         .def("create_psi4_string_from_molecule", &Molecule::create_psi4_string_from_molecule,
              "Gets a string re-expressing in input format the current state of the molecule."
              "Contains Cartesian geometry info, fragmentation, charges and multiplicities, "
@@ -990,10 +985,12 @@ void export_mints(py::module& m) {
              "Gets the multiplicity of each fragment")
         .def("atom_at_position", &Molecule::atom_at_position1,
              "Returns the index of the atom inside *tol* radius around *coord*. Returns -1 for no atoms, "
-             "throws an exception if more than one is found.", "coord"_a, "tol"_a)
+             "throws an exception if more than one is found.",
+             "coord"_a, "tol"_a)
         .def("atom_at_position", &Molecule::atom_at_position3,
              "Returns the index of the atom inside *tol* radius around *coord*. Returns -1 for no atoms, "
-             "throws an exception if more than one is found.", "coord"_a, "tol"_a)
+             "throws an exception if more than one is found.",
+             "coord"_a, "tol"_a)
         .def("print_out", &Molecule::print, "Prints the molecule in Cartesians in input units to output file")
         .def("print_out_in_bohr", &Molecule::print_in_bohr, "Prints the molecule in Cartesians in Bohr to output file")
         .def("print_out_in_angstrom", &Molecule::print_in_angstrom,
@@ -1415,9 +1412,10 @@ void export_mints(py::module& m) {
         .def("ao_multipoles", &IntegralFactory::ao_multipoles,
              "Returns a OneBodyInt that computes arbitrary-order AO multipole integrals", "order"_a, "deriv"_a = 0)
         .def("so_multipoles", &IntegralFactory::so_multipoles,
-          "Returns a OneBodyInt that computes arbitrary-order SO multipole integrals", "order"_a, "deriv"_a = 0)
+             "Returns a OneBodyInt that computes arbitrary-order SO multipole integrals", "order"_a, "deriv"_a = 0)
         .def("ao_multipole_potential", &IntegralFactory::ao_multipole_potential,
-             "Returns a OneBodyInt that computes arbitrary-order AO multipole potential integrals", "order"_a, "deriv"_a = 0)
+             "Returns a OneBodyInt that computes arbitrary-order AO multipole potential integrals", "order"_a,
+             "deriv"_a = 0)
         .def("ao_traceless_quadrupole", &IntegralFactory::ao_traceless_quadrupole,
              "Returns a OneBodyInt that computes the traceless AO quadrupole integral")
         .def("so_traceless_quadrupole", &IntegralFactory::so_traceless_quadrupole,
@@ -1524,15 +1522,16 @@ void export_mints(py::module& m) {
              "Vector AO EFP multipole integrals", "origin"_a, "deriv"_a = 0)
         .def("ao_multipole_potential", &MintsHelper::ao_multipole_potential, "Vector AO multipole potential integrals",
              "order"_a, "origin"_a, "deriv"_a = 0)
-        .def("electric_field", &MintsHelper::electric_field, "Vector electric field integrals",
-             "origin"_a, "deriv"_a = 0)
+        .def("electric_field", &MintsHelper::electric_field, "Vector electric field integrals", "origin"_a,
+             "deriv"_a = 0)
         .def("induction_operator", &MintsHelper::induction_operator,
              "Induction operator, formed by contracting electric field integrals with dipole moments at given "
              "coordinates (needed for EFP and PE)")
         .def("electric_field_value", &MintsHelper::electric_field_value,
              "Electric field expectation value at given sites")
         .def("electrostatic_potential_value", &MintsHelper::electrostatic_potential_value,
-             "Electrostatic potential values at given sites with associated charge, specified as an (n_sites, 4) matrix.",
+             "Electrostatic potential values at given sites with associated charge, specified as an (n_sites, 4) "
+             "matrix.",
              "charges"_a, "coords"_a, "D"_a)
 
         // Two-electron AO
@@ -1547,13 +1546,13 @@ void export_mints(py::module& m) {
         .def("ao_f12_squared", normal_f122(&MintsHelper::ao_f12_squared), "AO F12 squared integrals", "corr"_a, "bs1"_a,
              "bs2"_a, "bs3"_a, "bs4"_a)
         .def("ao_f12g12", normal_f12(&MintsHelper::ao_f12g12), "AO F12G12 integrals", "corr"_a)
-        .def("ao_f12g12", normal_f122(&MintsHelper::ao_f12g12), "AO F12G12 integrals", "corr"_a, "bs1"_a,
-             "bs2"_a, "bs3"_a, "bs4"_a)
-        .def("ao_f12_double_commutator", normal_f12(&MintsHelper::ao_f12_double_commutator), "AO F12 double commutator integrals",
-             "corr"_a)
-        .def("ao_f12_double_commutator", normal_f122(&MintsHelper::ao_f12_double_commutator), "AO F12 double commutator integrals", "corr"_a, "bs1"_a,
-             "bs2"_a, "bs3"_a, "bs4"_a)
-	.def("f12_cgtg", &MintsHelper::f12_cgtg, "F12 Fitted Slater Correlation Factor", "exponent"_a = 1.0)
+        .def("ao_f12g12", normal_f122(&MintsHelper::ao_f12g12), "AO F12G12 integrals", "corr"_a, "bs1"_a, "bs2"_a,
+             "bs3"_a, "bs4"_a)
+        .def("ao_f12_double_commutator", normal_f12(&MintsHelper::ao_f12_double_commutator),
+             "AO F12 double commutator integrals", "corr"_a)
+        .def("ao_f12_double_commutator", normal_f122(&MintsHelper::ao_f12_double_commutator),
+             "AO F12 double commutator integrals", "corr"_a, "bs1"_a, "bs2"_a, "bs3"_a, "bs4"_a)
+        .def("f12_cgtg", &MintsHelper::f12_cgtg, "F12 Fitted Slater Correlation Factor", "exponent"_a = 1.0)
         .def("ao_3coverlap", normal_eri(&MintsHelper::ao_3coverlap), "3 Center overlap integrals")
         .def("ao_3coverlap", normal_3c(&MintsHelper::ao_3coverlap), "3 Center overlap integrals", "bs1"_a, "bs2"_a,
              "bs3"_a)
@@ -1577,8 +1576,8 @@ void export_mints(py::module& m) {
 
         // Contracted gradient terms
         .def("dipole_grad", &MintsHelper::dipole_grad, "First nuclear derivative dipole integrals")
-        .def("multipole_grad", &MintsHelper::multipole_grad, "First nuclear derivative multipole integrals",
-             "D"_a, "order"_a, "origin"_a)
+        .def("multipole_grad", &MintsHelper::multipole_grad, "First nuclear derivative multipole integrals", "D"_a,
+             "order"_a, "origin"_a)
         .def("overlap_grad", &MintsHelper::overlap_grad, "First nuclear derivative overlap integrals")
         .def("kinetic_grad", &MintsHelper::kinetic_grad, "First nuclear derivative kinetic integrals")
         .def("potential_grad", &MintsHelper::potential_grad, "First nuclear derivative potential integrals")
@@ -1626,7 +1625,6 @@ void export_mints(py::module& m) {
         .def("mo_elec_dip_deriv1", &MintsHelper::mo_elec_dip_deriv1,
              "Gradient of MO basis electric dipole integrals: returns (3 * natoms) matrices", "atom"_a, "C1"_a, "C2"_a);
 
-
     py::class_<OrbitalSpace>(m, "OrbitalSpace", "Contains information about the orbitals")
         .def(py::init<const std::string&, const std::string&, const SharedMatrix&, const SharedVector&,
                       const std::shared_ptr<BasisSet>&, const std::shared_ptr<IntegralFactory>&>())
@@ -1642,7 +1640,7 @@ void export_mints(py::module& m) {
         .def("integral", &OrbitalSpace::integral, "The integral factory used to create C")
         .def("dim", &OrbitalSpace::dim, "MO dimensions")
         .def("print_out", &OrbitalSpace::print, "Print information about the orbital space to the output file")
-	   .def_static("build_cabs_space", &OrbitalSpace::build_cabs_space,
+        .def_static("build_cabs_space", &OrbitalSpace::build_cabs_space,
                     "Given two spaces, it projects out one space from the other and returns the new spaces \
                     The first argument (orb_space) is the space to project out. The returned space will be orthogonal to this \
                     The second argument (ri_space) is the space that is being projected on. The returned space = ri_space - orb_space \
@@ -1746,11 +1744,14 @@ void export_mints(py::module& m) {
 
     m.def("test_matrix_dpd_interface", &psi::test_matrix_dpd_interface);
 
-    m.def("_libint2_configuration", []() { return libint2::configuration_accessor(); },
+    m.def(
+        "_libint2_configuration", []() { return libint2::configuration_accessor(); },
         "Returns string with codes detailing the integral classes, angular momenta, and ordering \
         characteristics of the linked Libint2. Prefer the processed libint2_configuration function.");
 
-    m.def("libint2_solid_harmonics_ordering", []() {
+    m.def(
+        "libint2_solid_harmonics_ordering",
+        []() {
             const std::string SHOrderingsList[] = {"null", "Standard", "Gaussian"};
             std::string sho = SHOrderingsList[int(libint2::solid_harmonics_ordering())];
             return sho;
@@ -1759,7 +1760,8 @@ void export_mints(py::module& m) {
 
     // when psi4 requires >=v2.8.0
     // m.def("libint2_supports", [](const std::string& comp) { return libint2::supports(comp); },
-    //    "Whether the linked Libint2 supports a particular ordering or integral type/derivative/AM. Use maximally uniform AM for latter.");
+    //    "Whether the linked Libint2 supports a particular ordering or integral type/derivative/AM. Use maximally
+    //    uniform AM for latter.");
 
     // when L2 is pure cmake
     // m.def("libint2_citation", []() {
