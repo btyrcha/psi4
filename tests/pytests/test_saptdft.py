@@ -30,6 +30,18 @@ units angstrom
 1   2.641145101   -0.449872874   -0.744894473
 units angstrom
 """,
+    "he_h2": """
+symmetry c1
+no_com
+no_reorient
+units bohr
+0 1
+He  -2.500000000   0.000000000   0.000000000
+--
+0 1
+H    1.775500000   0.000000000   0.000000000
+H    3.224500000   0.000000000   0.000000000
+""",
 }
 
 
@@ -113,6 +125,32 @@ def test_saptdft_auto_grac(SAPT_DFT_GRAC_COMPUTE, refA, refB, gracA, gracB, geom
         grac_tol,
         "SAPT DFT GRAC SHIFT B",
     )
+
+
+@pytest.mark.saptdft
+def test_saptdft_hybrid_small_monomer():
+    """
+    The hybrid xc kernel of the coupled FDDS dispersion QR-factorizes each monomer's (ar|Q), an
+    (nocc*nvir) x naux matrix. Here both monomers have nocc*nvir = 26 < naux = 59, so only an
+    economy QR (with min(nocc*nvir, naux) columns of Q) is defined; the full QR used before gave
+    run-dependent garbage or NaN (#2178). The reference agrees, to about 1e-14 Eh in Disp20, with
+    a dense evaluation of the same equations that uses pinv((ar|Q)^T) instead of a QR.
+    """
+    psi4.geometry(_sapt_testing_mols["he_h2"])
+    psi4.set_options({
+        "basis": "aug-cc-pvdz",
+        "scf_type": "direct",
+        "e_convergence": 1.e-10,
+        "d_convergence": 1.e-10,
+        "SAPT_DFT_FUNCTIONAL": "pbe0",
+        "SAPT_DFT_GRAC_SHIFT_A": 0.2433,
+        "SAPT_DFT_GRAC_SHIFT_B": 0.1375,
+        "SAPT_DFT_DO_DHF": False,
+        "SAPT_DFT_DO_HYBRID": True,
+    })
+    psi4.energy("SAPT(DFT)")
+    assert compare_values(-4.047420094518e-04, psi4.variable("SAPT DISP ENERGY"), 1.e-8, "SAPT DISP ENERGY")
+    assert compare_values(6.107695195523e-04, psi4.variable("SAPT TOTAL ENERGY"), 1.e-8, "SAPT TOTAL ENERGY")
 
 
 if __name__ == "__main__":
