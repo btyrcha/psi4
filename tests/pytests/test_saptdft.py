@@ -134,7 +134,9 @@ def test_saptdft_hybrid_small_monomer():
     (nocc*nvir) x naux matrix. Here both monomers have nocc*nvir = 26 < naux = 59, so only an
     economy QR (with min(nocc*nvir, naux) columns of Q) is defined; the full QR used before gave
     run-dependent garbage or NaN (#2178). The reference agrees, to about 1e-14 Eh in Disp20, with
-    a dense evaluation of the same equations that uses pinv((ar|Q)^T) instead of a QR.
+    a dense evaluation of the same equations that uses pinv((ar|Q)^T) instead of a QR. With
+    nocc*nvir < naux the hybrid kernel is not projected, so Disp20 also equals, to about 1e-14 Eh,
+    the coupled response of Eq. (39) of Xie et al., JCP 157, 024801 (2022) evaluated densely.
     """
     psi4.geometry(_sapt_testing_mols["he_h2"])
     psi4.set_options({
@@ -149,8 +151,8 @@ def test_saptdft_hybrid_small_monomer():
         "SAPT_DFT_DO_HYBRID": True,
     })
     psi4.energy("SAPT(DFT)")
-    assert compare_values(-4.047420094518e-04, psi4.variable("SAPT DISP ENERGY"), 1.e-8, "SAPT DISP ENERGY")
-    assert compare_values(6.107695195523e-04, psi4.variable("SAPT TOTAL ENERGY"), 1.e-8, "SAPT TOTAL ENERGY")
+    assert compare_values(-4.062469577229e-04, psi4.variable("SAPT DISP ENERGY"), 1.e-8, "SAPT DISP ENERGY")
+    assert compare_values(6.092645712810e-04, psi4.variable("SAPT TOTAL ENERGY"), 1.e-8, "SAPT TOTAL ENERGY")
 
 
 if __name__ == "__main__":

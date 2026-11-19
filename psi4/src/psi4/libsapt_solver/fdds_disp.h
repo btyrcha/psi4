@@ -69,7 +69,22 @@ class FDDS_Dispersion {
     // QR factorization result
     SharedMatrix R_A_, R_B_;
 
+    /**
+     * Writes M, nocc * nvir rows in (ar) order and n columns, to disk as the tensors ar_name (nocc, nvir, n)
+     * and ra_name (nvir, nocc, n)
+     * @param tmp Scratch matrix of the same shape as M
+     */
+    void write_ar_ra(SharedMatrix M, SharedMatrix tmp, size_t nocc, size_t nvir, const std::string& ar_name,
+                     const std::string& ra_name);
+
    public:
+    /// One contraction in form_X/form_Y: input and output disk tensor names and their last dimension
+    struct XYContraction {
+        std::string in;
+        std::string out;
+        size_t ncol;
+    };
+
     /**
      * Constructs the FDDS_Dispersion object.
      * @param primary   The primary basis
@@ -105,10 +120,13 @@ class FDDS_Dispersion {
      * @param  omega   Time dependent value
      * @return         Dictionary of PQ matrics 
      * @return ret["amp"]  PQ uncoupled amplitude
-     * @return ret["K1LD"]  K1(lambda * d) = (P|ar) LDar (ar|X+Y|Q)
-     * @return ret["K2LD"]  K2(lambda * d) = (P|ar) LDar (ar|X-Y|Q)
-     * @return ret["K2L"]  K2(lambda) = (P|ar) Lar (ar|X-Y|Q)
-     * @return ret["K21L"]  K21(lambda) = (P|X-Y|ar) Lar (ar|X+Y|Q)
+     * @return ret["K1LD"]  K1(lambda * d) = (P|ar) LDar [(X+Y) Q]_ar
+     * @return ret["K2LD"]  K2(lambda * d) = (P|ar) Lar [(Y-X) d Q]_ar
+     * @return ret["K2L"]  K2(lambda) = (P|ar) Lar [(Y-X) (ar|Q)]_ar
+     * @return ret["K21L"]  K21(lambda) = (P|ar) Lar [(Y-X) (X+Y) Q]_ar
+     * with X[ar,a'r'] = (ar'|a'r), Y[ar,a'r'] = (aa'|rr'), d = e_r - e_a, L = -4 / (d^2 + omega^2) and Q of QR().
+     * Lambda and d sit where the Woodbury expansion of Eq. (39) of Xie et al., JCP 157, 024801 (2022) puts
+     * them; Eqs. (45), (46), (57) and (58) there place them differently.
      * amp and K2L are naux x naux; K1LD, K2LD and K21L are naux x k, with k = min(nocc * nvir, naux)
      */
     std::map<std::string, SharedMatrix> form_aux_matrices(std::string monomer, double omega);
@@ -144,20 +162,32 @@ class FDDS_Dispersion {
     SharedMatrix R_B() { return R_B_; }
 
     /**
-     * Forms X-type 3-index exchange integral tensor (ar|X|Q) = (ar'|a'r)(a'r'|Q)
+     * Contracts the X-type exchange matrix X[ar,a'r'] = (ar'|a'r) with 3-index tensors,
+     * (ar|out|Q) = sum_a'r' (ar'|a'r) (a'r'|in|Q), all in one pass over the integrals
      * @param monomer Monomer "A" or "B"
+     * @param in_out  in: existing (nocc, nvir, ncol) disk tensors; out: created with the same shape
      */
-    void form_X(std::string monomer);
+    void form_X(std::string monomer, const std::vector<XYContraction>& in_out);
 
     /**
-     * Forms Y-type 3-index exchange integral tensor (ar|Y|Q) = (aa'|rr')(a'r'|Q)
+     * Contracts the Y-type exchange matrix Y[ar,a'r'] = (aa'|rr') with 3-index tensors,
+     * (ar|out|Q) = sum_a'r' (aa'|rr') (r'a'|in|Q), all in one pass over the integrals
+     * @param monomer Monomer "A" or "B"
+     * @param in_out  in: existing (nvir, nocc, ncol) disk tensors, (ra) order; out: created as (nocc, nvir, ncol)
+     */
+    void form_Y(std::string monomer, const std::vector<XYContraction>& in_out);
+
+    /**
+     * Writes (X+Y) Q = (ar|QX|Q) + (ar|QY|Q) to disk in (ar) and (ra) order, as (ar|QP|Q) and (ra|QP|Q),
+     * the input of the form_X/form_Y pass that gives (Y-X) (X+Y) Q for K21
      * @param monomer Monomer "A" or "B"
      */
-    void form_Y(std::string monomer);
+    void form_XpYQ(std::string monomer);
 
     /**
      * Performs the economy QR factorization (ar|Q) = Q R, with k = min(nocc * nvir, naux) columns of Q.
-     * Writes Q to disk as (ar|Q|Q) and (ra|Q|Q), both k wide in the last index.
+     * Writes Q to disk as (ar|Q|Q) and (ra|Q|Q), and d Q (d = e_r - e_a) as (ar|QD|Q) and (ra|QD|Q),
+     * all k wide in the last index.
      * @param monomer Monomer "A" or "B"
      * @return R, k x naux, stored into R_A_ or R_B_ by the caller
      */
