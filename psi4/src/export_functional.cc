@@ -332,8 +332,10 @@ void export_functional(py::module &m) {
              "Debug only: prints formatted 3-index intermediate to file.")
         .def("form_aux_matrices", &sapt::FDDS_Dispersion::form_aux_matrices,
              "Forms the uncoupled amplitudes and other matrices for either monomer.")
-        .def("R_A", &sapt::FDDS_Dispersion::R_A, "Obtains (R^t)^-1 for monomer A.")
-        .def("R_B", &sapt::FDDS_Dispersion::R_B, "Obtains (R^t)^-1 for monomer B.");
+        .def("R_A", &sapt::FDDS_Dispersion::R_A,
+             "Obtains R of the economy QR of (ar|Q) for monomer A, k x naux with k = min(nocc * nvir, naux).")
+        .def("R_B", &sapt::FDDS_Dispersion::R_B,
+             "Obtains R of the economy QR of (bs|Q) for monomer B, k x naux with k = min(nocc * nvir, naux).");
 
      py::class_<NumIntHelper, std::shared_ptr<NumIntHelper>>(m, "NumIntHelper",
                                                              "Computes numerical integrals using a DFT grid.")

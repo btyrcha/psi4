@@ -109,6 +109,7 @@ class FDDS_Dispersion {
      * @return ret["K2LD"]  K2(lambda * d) = (P|ar) LDar (ar|X-Y|Q)
      * @return ret["K2L"]  K2(lambda) = (P|ar) Lar (ar|X-Y|Q)
      * @return ret["K21L"]  K21(lambda) = (P|X-Y|ar) Lar (ar|X+Y|Q)
+     * amp and K2L are naux x naux; K1LD, K2LD and K21L are naux x k, with k = min(nocc * nvir, naux)
      */
     std::map<std::string, SharedMatrix> form_aux_matrices(std::string monomer, double omega);
 
@@ -131,13 +132,13 @@ class FDDS_Dispersion {
     SharedMatrix aux_overlap() { return aux_overlap_; }
 
     /**
-     * Returns R for QR decomposition of (ar|Q)
+     * Returns R for the economy QR decomposition of (ar|Q), k x naux with k = min(nocc * nvir, naux)
      * @return R_A
      */
     SharedMatrix R_A() { return R_A_; }
 
     /**
-     * Returns R for QR decomposition of (bs|Q)
+     * Returns R for the economy QR decomposition of (bs|Q), k x naux with k = min(nocc * nvir, naux)
      * @return R_B
      */
     SharedMatrix R_B() { return R_B_; }
@@ -155,9 +156,10 @@ class FDDS_Dispersion {
     void form_Y(std::string monomer);
 
     /**
-     * Performs QR factorization and store (R^t)^-1 into R_A_ or R_B_
+     * Performs the economy QR factorization (ar|Q) = Q R, with k = min(nocc * nvir, naux) columns of Q.
+     * Writes Q to disk as (ar|Q|Q) and (ra|Q|Q), both k wide in the last index.
      * @param monomer Monomer "A" or "B"
-     * @return (R^t)^-1
+     * @return R, k x naux, stored into R_A_ or R_B_ by the caller
      */
     SharedMatrix QR(std::string monomer);
 

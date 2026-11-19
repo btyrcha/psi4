@@ -149,15 +149,8 @@ def df_fdds_dispersion(primary, auxiliary, cache, is_hybrid, x_alpha, leg_points
     if is_hybrid:
         R_A = fdds_obj.R_A().to_array()
         R_B = fdds_obj.R_B().to_array()
-        # `pinv` below can throw `numpy.linalg.LinAlgError: "SVD did not converge"`, so sanitize arrays
-        # zero_tol = 1e-20
-        # R_A[np.abs(R_A) < zero_tol] = 0
-        # R_B[np.abs(R_B) < zero_tol] = 0
-        R_A = np.nan_to_num(R_A)
-        R_B = np.nan_to_num(R_B)
-        # with np.printoptions(threshold=sys.maxsize):
-        #     print("R_A SANITIZED", R_A)
-        #     print("R_B SANITIZED", R_B)
+        # R is k x naux with k = min(nocc * nvir, naux) (economy QR of (ar|Q)), so Rtinv is k x naux
+        # and K (naux x k) @ Rtinv @ metric below is naux x naux
         Rtinv_A = np.linalg.pinv(R_A, rcond=1.e-13).transpose()
         Rtinv_B = np.linalg.pinv(R_B, rcond=1.e-13).transpose()
 
